@@ -19,7 +19,7 @@
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
-    <OutputPath>bin\Debug\</OutputPath>
+    <OutputPath>..\..\client\</OutputPath>
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
@@ -46,7 +46,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ContentManager.cs" />
-    <Compile Include="GameObject.cs" />
+    <Compile Include="GameObjects\IDrawable.cs" />
     <Compile Include="NetClient.cs" />
     <Compile Include="OpenGL\GLObject.cs" />
     <Compile Include="OpenGL\Shader.cs" />
@@ -54,11 +54,10 @@
     <Compile Include="OpenGL\Texture.cs" />
     <Compile Include="OpenGL\VertexArrayObject.cs" />
     <Compile Include="OpenGL\VertexBufferObject.cs" />
-    <Compile Include="Player.cs" />
+    <Compile Include="GameObjects\ClientPlayer.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Renderer.cs" />
-    <Compile Include="Sprite.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

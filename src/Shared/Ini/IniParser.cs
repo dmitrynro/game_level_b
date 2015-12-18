@@ -6,7 +6,7 @@ namespace Shared.Ini
         public static IniFile Parse(string[] source)
         {
             IniFile file = new IniFile();
-            IniFileSection currentSection = file.Global;
+            IniFileSection currentSection = file;
 
             foreach (string str in source)
             {

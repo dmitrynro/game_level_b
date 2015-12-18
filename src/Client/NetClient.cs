@@ -1,22 +1,60 @@
 ﻿using System;
+using System.IO;
 using System.Net.Sockets;
+using Shared;
 
 namespace Client
 {
-    public sealed class NetClient
+    public sealed class NetClient : IDisposable
     {
-        public TcpClient TcpClient;
+        private TcpClient TcpClient;
 
-        public NetClient(string host, int port)
+        public event EventHandler<TcpClient> ReceivedData = (s, e) => { };
+
+        public NetClient()
         {
             TcpClient = new TcpClient();
+        }
+
+        public void Connect(string host, int port)
+        {
             TcpClient.Connect(host, port);
         }
 
-        public void ProcessMessages(Action<TcpClient> messageCallback)
+        public void Disconnect()
         {
-            if (TcpClient.Available > 0 && messageCallback != null)
-                messageCallback(TcpClient);
+            if (TcpClient.Connected)
+                TcpClient.Close();
+        }
+
+        public void ProcessMessages()
+        {
+            if (TcpClient.Available > 0)
+                ReceivedData(this, TcpClient);
+        }
+
+        public void SendMessage(params object[] args)
+        {
+            try
+            {
+                Stream stream = TcpClient.GetStream();
+                stream.Write(args);
+            }
+            catch
+            {
+            }
+        }
+
+        public bool Disposed { get; private set; } = false;
+
+        public void Dispose()
+        {
+            if (!Disposed)
+            {
+                Disconnect();
+
+                Disposed = true;
+            }
         }
     }
 }

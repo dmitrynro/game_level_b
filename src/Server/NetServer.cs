@@ -1,23 +1,30 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Sockets;
+using Shared;
 
 namespace Server
 {
     public sealed class NetServer
     {
         private TcpListener TcpListener;
+        private List<TcpClient> Clients = new List<TcpClient>();
 
         public bool Running { get; private set; } = true;
 
-        public List<TcpClient> Clients = new List<TcpClient>();
+        public event EventHandler<TcpClient> ClientConnected = (s, e) => { };
+        public event EventHandler<TcpClient> ReceivedData = (s, e) => { };
+        public event EventHandler<TcpClient> ClientDisconnected = (s, e) => { };
 
         public NetServer(int port)
         {
             TcpListener = TcpListener.Create(port);
+            TcpListener.Server.ReceiveTimeout = 1000;
+            TcpListener.Server.SendTimeout = 1000;
         }
 
-        public async void Start(Action<TcpClient> connectedCallback)
+        public async void Start()
         {
             TcpListener.Start();
 
@@ -25,9 +32,7 @@ namespace Server
             {
                 var client = await TcpListener.AcceptTcpClientAsync();
                 Clients.Add(client);
-
-                if (connectedCallback != null)
-                    connectedCallback(client);
+                ClientConnected(this, client);
             }
         }
 
@@ -36,15 +41,14 @@ namespace Server
             Running = false;
         }
 
-        public void ProcessMessages(Action<TcpClient> messageCallback)
+        public void ProcessMessages()
         {
-            if (messageCallback != null)
-                foreach (var client in Clients)
-                    if (client.Available > 0)
-                        messageCallback(client);
+            foreach (var client in Clients)
+                if (client.Available > 0)
+                    ReceivedData(this, client);
         }
 
-        public void RemoveDisconnectedClients(Action<TcpClient> disconnectedCallback)
+        public void RemoveDisconnectedClients()
         {
             List<TcpClient> markedToDelete = new List<TcpClient>();
 
@@ -52,13 +56,28 @@ namespace Server
                 if (!client.Connected)
                     markedToDelete.Add(client);
 
-            if (disconnectedCallback != null)
-                foreach (var client in markedToDelete)
-                    disconnectedCallback(client);
+            foreach (var client in markedToDelete)
+                ClientDisconnected(this, client);
 
             Clients.RemoveAll(markedToDelete.Contains);
         }
 
-        // TODO поменять callback-и на event-ы
+        public void SendMessage(TcpClient client, params object[] args)
+        {
+            try
+            {
+                Stream stream = client.GetStream();
+                stream.Write(args);
+            }
+            catch
+            {
+            }
+        }
+
+        public void BroadcastMessage(params object[] args)
+        {
+            foreach (var client in Clients)
+                SendMessage(client, args);
+        }
     }
 }

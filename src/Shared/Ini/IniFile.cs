@@ -2,31 +2,24 @@
 
 namespace Shared.Ini
 {
-    public class IniFile
+    public class IniFile : IniFileSection
     {
         public Dictionary<string, IniFileSection> Sections = new Dictionary<string, IniFileSection>();
 
-        public IniFileSection Global { get { return Sections["global"]; } }
-
         public IniFile()
         {
-            Sections.Add("global", new IniFileSection());
+            Sections["global"] = this;
         }
 
-        public bool TryGetValue(string section, string value, out string result)
+        public bool TryGetValue(string section, string value, out string result, string defaultValue = "")
         {
             if (Sections.ContainsKey(section))
-                return Sections[section].TryGetValue(value, out result);
+                return Sections[section].TryGetValue(value, out result, defaultValue);
             else
             {
-                result = "";
+                result = defaultValue;
                 return false;
             }
-        }
-
-        public bool TryGetValue(string value, out string result)
-        {
-            return TryGetValue("global", value, out result);
         }
     }
 }

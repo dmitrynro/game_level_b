@@ -2,12 +2,15 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
+using Client.GameObjects;
 using Client.OpenGL;
 using OpenTK;
 using OpenTK.Graphics;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Input;
 using Shared;
+using Shared.GameObjects;
 using Shared.Ini;
 
 namespace Client
@@ -19,29 +22,91 @@ namespace Client
         public static NetClient NetClient;
         public static ContentManager Content;
 
-        public static List<GameObject> GameObjects = new List<GameObject>();
-        public static Dictionary<int, Player> Players = new Dictionary<int, Player>();
+        public static int ClientId = 0;
+        public static Dictionary<int, GameObject> GameObjects = new Dictionary<int, GameObject>();
+
+        public static IEnumerable<ClientPlayer> Players { get { return GameObjects.Where(obj => obj.Value is ClientPlayer).Select(obj => obj.Value as ClientPlayer); } }
 
         private static void Main(string[] args)
         {
             using (Window = new GameWindow(800, 600, new GraphicsMode(new ColorFormat(32), 0, 0, 0, ColorFormat.Empty, 2, false), "Fag Game Client",
                 GameWindowFlags.Default, DisplayDevice.Default, 4, 0, GraphicsContextFlags.ForwardCompatible))
             {
-                Vector2 susekaPosition = new Vector2(100, 100);
-
                 Window.Load += (s, e) =>
                 {
                     IniFile settings = IniParser.Parse(File.ReadAllLines("settings.ini"));
 
-                    string host = "127.0.0.1";
-                    string port = "10000";
-
-                    settings.TryGetValue("ServerHost", out host);
-                    settings.TryGetValue("ServerPort", out port);
-
                     Renderer = new Renderer();
-                    NetClient = new NetClient(host, int.Parse(port));
+                    NetClient = new NetClient();
                     Content = new ContentManager();
+
+                    string host, port;
+
+                    settings.TryGetValue("ServerHost", out host, "127.0.0.1");
+                    settings.TryGetValue("ServerPort", out port, "10000");
+
+                    NetClient.Connect(host, int.Parse(port));
+
+                    NetClient.ReceivedData += (sender, connection) =>
+                    {
+                        while (connection.Available > 0)
+                        {
+                            Stream stream = connection.GetStream();
+
+                            switch ((NetMessageType)stream.ReadByte())
+                            {
+                                case NetMessageType.ClientConnected:
+                                    {
+                                        int playerId = stream.ReadInt32();
+
+                                        if (!GameObjects.ContainsKey(playerId))
+                                        {
+                                            ClientPlayer player = new ClientPlayer(playerId);
+                                            GameObjects.Add(playerId, player);
+                                        }
+                                    }
+                                    break;
+
+                                case NetMessageType.ClientDisconnected:
+                                    GameObjects.Remove(stream.ReadInt32());
+                                    break;
+
+                                case NetMessageType.SetClientId:
+                                    ClientId = stream.ReadInt32();
+                                    break;
+
+                                case NetMessageType.SetPosition:
+                                    {
+                                        int playerId = stream.ReadInt32();
+                                        Vector2 position = stream.ReadVector2();
+
+                                        if (!GameObjects.ContainsKey(playerId))
+                                        {
+                                            ClientPlayer player = new ClientPlayer(playerId);
+                                            GameObjects.Add(playerId, player);
+                                        }
+
+                                        GameObjects[playerId].Position = position;
+                                    }
+                                    break;
+
+                                case NetMessageType.SetVelocity:
+                                    {
+                                        int playerId = stream.ReadInt32();
+                                        Vector2 velocity = stream.ReadVector2();
+
+                                        if (!GameObjects.ContainsKey(playerId))
+                                        {
+                                            ClientPlayer player = new ClientPlayer(playerId);
+                                            GameObjects.Add(playerId, player);
+                                        }
+
+                                        GameObjects[playerId].Velocity = velocity;
+                                    }
+                                    break;
+                            }
+                        }
+                    };
 
                     using (var vertexShader = new Shader(ShaderType.VertexShader, File.ReadAllText(Path.Combine("Data", "texture.vsh")), Console.WriteLine))
                     using (var fragmentShader = new Shader(ShaderType.FragmentShader, File.ReadAllText(Path.Combine("Data", "texture.psh")), Console.WriteLine))
@@ -64,30 +129,10 @@ namespace Client
 
                 Window.UpdateFrame += (s, e) =>
                 {
-                    NetClient.ProcessMessages((client) =>
-                    {
-                        while (client.Available > 0)
-                        {
-                            Stream stream = client.GetStream();
+                    NetClient.ProcessMessages();
 
-                            switch ((NetMessageType)stream.ReadByte())
-                            {
-                                case NetMessageType.SetPosition:
-                                    int id = stream.ReadInt32();
-                                    Vector2 position = new Vector2(stream.ReadSingle(), stream.ReadSingle());
-
-                                    if (!Players.ContainsKey(id))
-                                    {
-                                        Player player = new Player();
-                                        Players.Add(id, player);
-                                        GameObjects.Add(player);
-                                    }
-
-                                    Players[id].Position = position;
-                                    break;
-                            }
-                        }
-                    });
+                    foreach (var kv in GameObjects)
+                        kv.Value.Update(1000 * (float)e.Time);
 
                     if (!Window.Focused)
                         return;
@@ -112,10 +157,10 @@ namespace Client
                     {
                         moveDirection.Normalize();
 
-                        Stream stream = NetClient.TcpClient.GetStream();
-                        stream.WriteByte((byte)NetMessageType.Move);
-                        stream.Write(moveDirection.X);
-                        stream.Write(moveDirection.Y);
+                        if (GameObjects.ContainsKey(ClientId))
+                            GameObjects[ClientId].Velocity = 0.1f * moveDirection;
+
+                        NetClient.SendMessage((byte)NetMessageType.SetMoveDirection, moveDirection);
                     }
                 };
 
@@ -126,8 +171,9 @@ namespace Client
                     Renderer.Clear();
                     Renderer.BeginPass(Content.Get<ShaderProgram>("TextureShader"));
 
-                    foreach (var gameObj in GameObjects)
-                        gameObj.Draw();
+                    foreach (var kv in GameObjects)
+                        if (kv.Value is IDrawable)
+                            (kv.Value as IDrawable).Draw();
 
                     Renderer.EndPass();
 
@@ -136,6 +182,7 @@ namespace Client
 
                 Window.Run();
 
+                NetClient?.Dispose();
                 Content?.Dispose();
             }
         }

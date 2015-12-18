@@ -4,9 +4,13 @@ namespace Shared
     public enum NetMessageType : byte
     {
         // Client to server
-        Move = 0, // float dx, float dy
+        SetMoveDirection = 0, // float dx, float dy
 
         // Server to client
-        SetPosition = 10, // int playerId, float x, float y
+        ClientConnected = 10, // int gameObjectId
+        ClientDisconnected = 11, // int gameObjectId
+        SetClientId = 12, // int gameObjectId
+        SetPosition = 13, // int gameObjectId, float x, float y
+        SetVelocity = 14, // int gameObjectId, float dx, float dy
     }
 }

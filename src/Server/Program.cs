@@ -1,9 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Net.Sockets;
 using System.Threading;
 using OpenTK;
 using Shared;
+using Shared.GameObjects;
 
 namespace Server
 {
@@ -13,7 +16,14 @@ namespace Server
 
         public static Thread MainThread, InputThread;
 
-        public static Dictionary<int, Player> Players = new Dictionary<int, Player>();
+        public static Dictionary<int, GameObject> GameObjects = new Dictionary<int, GameObject>();
+
+        public static IEnumerable<Player> Players { get { return GameObjects.Where(obj => obj.Value is Player).Select(obj => obj.Value as Player); } }
+
+        private static int CreateIdFromConnection(TcpClient client)
+        {
+            return 1000 + Math.Abs(client.Client.RemoteEndPoint.GetHashCode());
+        }
 
         private static void Main(string[] args)
         {
@@ -35,51 +45,72 @@ namespace Server
             InputThread.Start();
 
             NetServer = new NetServer(10000);
-            NetServer.Start((client) =>
+
+            NetServer.ClientConnected += (s, client) =>
             {
                 Console.WriteLine("Client connected {0}", client.Client.RemoteEndPoint);
-                Players.Add(client.Client.RemoteEndPoint.GetHashCode(), new Player());
-            });
+
+                int playerId = CreateIdFromConnection(client);
+                GameObjects.Add(playerId, new Player(playerId));
+
+                NetServer.BroadcastMessage((byte)NetMessageType.ClientConnected, playerId);
+                NetServer.SendMessage(client, (byte)NetMessageType.SetClientId, playerId);
+            };
+
+            NetServer.ClientDisconnected += (s, client) =>
+            {
+                Console.WriteLine("Client disconnected {0}", client.Client.RemoteEndPoint);
+
+                int playerId = CreateIdFromConnection(client);
+                GameObjects.Remove(playerId);
+
+                NetServer.BroadcastMessage((byte)NetMessageType.ClientDisconnected, playerId);
+            };
+
+            NetServer.ReceivedData += (s, client) =>
+            {
+                while (client.Available > 0)
+                {
+                    Stream stream = client.GetStream();
+
+                    switch ((NetMessageType)stream.ReadByte())
+                    {
+                        case NetMessageType.SetMoveDirection:
+                            int playerId = CreateIdFromConnection(client);
+                            Vector2 moveDirection = stream.ReadVector2();
+
+                            Player player = GameObjects[playerId] as Player;
+                            player.Velocity = 0.1f * moveDirection;
+                            break;
+                    }
+                }
+            };
+
+            NetServer.Start();
+
+            const int targetFps = 60;
+            const float delay = 1000f / targetFps; // TODO нормально считать время с последнего апдейта
+
+            int n = 0;
 
             while (NetServer.Running)
             {
-                const float elapsedTime = 0.01f; // TODO нормально считать время с последнего апдейта
+                NetServer.RemoveDisconnectedClients();
+                NetServer.ProcessMessages();
 
-                NetServer.ProcessMessages((client) =>
-                {
-                    while (client.Available > 0)
+                foreach (var kv in GameObjects)
+                    kv.Value.Update(delay);
+
+                if (n % 10 == 0)
+                    foreach (var player in Players)
                     {
-                        Stream stream = client.GetStream();
-
-                        switch ((NetMessageType)stream.ReadByte())
-                        {
-                            case NetMessageType.Move:
-                                int id = client.Client.RemoteEndPoint.GetHashCode();
-                                Player player = Players[id];
-                                Vector2 moveDirection = new Vector2(stream.ReadSingle(), stream.ReadSingle());
-                                Vector2 position = player.Position + 100 * moveDirection * elapsedTime;
-                                player.Position = position;
-
-                                foreach (var cl in NetServer.Clients)
-                                {
-                                    Stream responseStream = cl.GetStream();
-                                    responseStream.WriteByte((byte)NetMessageType.SetPosition);
-                                    responseStream.Write(id);
-                                    responseStream.Write(position.X);
-                                    responseStream.Write(position.Y);
-                                }
-                                break;
-                        }
+                        NetServer.BroadcastMessage((byte)NetMessageType.SetPosition, player.Id, player.Position);
+                        NetServer.BroadcastMessage((byte)NetMessageType.SetVelocity, player.Id, player.Velocity);
                     }
-                });
 
-                NetServer.RemoveDisconnectedClients((client) =>
-                {
-                    Players.Remove(client.Client.RemoteEndPoint.GetHashCode());
-                    Console.WriteLine("Client disconnected {0}", client.Client.RemoteEndPoint);
-                });
+                n++;
 
-                Thread.Sleep(10);
+                Thread.Sleep((int)Math.Ceiling(delay));
             }
         }
     }

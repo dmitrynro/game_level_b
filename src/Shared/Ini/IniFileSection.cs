@@ -6,7 +6,7 @@ namespace Shared.Ini
     {
         public Dictionary<string, string> Values = new Dictionary<string, string>();
 
-        public bool TryGetValue(string value, out string result)
+        public bool TryGetValue(string value, out string result, string defaultValue = "")
         {
             if (Values.ContainsKey(value))
             {
@@ -15,7 +15,7 @@ namespace Shared.Ini
             }
             else
             {
-                result = "";
+                result = defaultValue;
                 return false;
             }
         }
