@@ -1,18 +1,23 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
 using System.Threading;
+using FarseerPhysics.Dynamics;
 using OpenTK;
 using Shared;
 using Shared.GameObjects;
+using Shared.Ini;
+using FPVector2 = Microsoft.Xna.Framework.Vector2;
 
 namespace Server
 {
     public static class Program
     {
         public static NetServer NetServer;
+        public static World World;
 
         public static Thread MainThread, InputThread;
 
@@ -44,14 +49,20 @@ namespace Server
             });
             InputThread.Start();
 
-            NetServer = new NetServer(10000);
+            IniFile settings = IniParser.Parse(File.ReadAllLines("settings.ini"));
+
+            string port;
+
+            settings.TryGetValue("ServerPort", out port, "10000");
+
+            NetServer = new NetServer(int.Parse(port));
 
             NetServer.ClientConnected += (s, client) =>
             {
                 Console.WriteLine("Client connected {0}", client.Client.RemoteEndPoint);
 
                 int playerId = CreateIdFromConnection(client);
-                GameObjects.Add(playerId, new Player(playerId));
+                GameObjects.Add(playerId, new Player(playerId, World));
 
                 NetServer.BroadcastMessage((byte)NetMessageType.ClientConnected, playerId);
                 NetServer.SendMessage(client, (byte)NetMessageType.SetClientId, playerId);
@@ -80,7 +91,7 @@ namespace Server
                             Vector2 moveDirection = stream.ReadVector2();
 
                             Player player = GameObjects[playerId] as Player;
-                            player.Velocity = 0.1f * moveDirection;
+                            player.Fixture.Body.ApplyForce(100000 * moveDirection.ToFPVector());
                             break;
                     }
                 }
@@ -88,18 +99,27 @@ namespace Server
 
             NetServer.Start();
 
+            World = new World(new FPVector2(0.0f, 9.81f));
+
+            GameObjects.Add(0, new Platform(0, World, new Vector2(0, 256), new Vector2(256, 16)));
+
             const int targetFps = 60;
-            const float delay = 1000f / targetFps; // TODO нормально считать время с последнего апдейта
+            float delay = 1000f / targetFps;
 
-            int n = 0;
+            Stopwatch sw = new Stopwatch();
 
-            while (NetServer.Running)
+            for (int n = 0; NetServer.Running; n++)
             {
+                sw.Reset();
+                sw.Start();
+
                 NetServer.RemoveDisconnectedClients();
                 NetServer.ProcessMessages();
 
+                World.Step(1f / targetFps);
+
                 foreach (var kv in GameObjects)
-                    kv.Value.Update(delay);
+                    kv.Value.Update(1000f / targetFps);
 
                 if (n % 10 == 0)
                     foreach (var player in Players)
@@ -108,9 +128,12 @@ namespace Server
                         NetServer.BroadcastMessage((byte)NetMessageType.SetVelocity, player.Id, player.Velocity);
                     }
 
-                n++;
+                sw.Stop();
 
-                Thread.Sleep((int)Math.Ceiling(delay));
+                delay = 1000f / targetFps - sw.ElapsedMilliseconds;
+
+                if (delay > 0)
+                    Thread.Sleep((int)Math.Ceiling(delay));
             }
         }
     }

@@ -14,6 +14,8 @@ namespace Client
         public NetClient()
         {
             TcpClient = new TcpClient();
+            TcpClient.ReceiveTimeout = 1000;
+            TcpClient.SendTimeout = 1000;
         }
 
         public void Connect(string host, int port)
